@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Class Watch</title>
+  <meta name="description" content="Get pinged the moment a full fitness class has a free spot." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%2316a34a' d='M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2Z'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>classwatch</span>
+    </div>
+    <label class="provider">
+      <span class="sr-only">Studio</span>
+      <select id="provider"></select>
+    </label>
+    <div class="top-actions">
+      <button class="btn ghost" id="open-watching" aria-haspopup="dialog">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span>Watching</span>
+        <span class="count" id="watch-count">0</span>
+      </button>
+      <button class="btn icon ghost" id="open-settings" aria-label="Settings">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="week" aria-label="Week">
+      <div class="week-head">
+        <h1 id="week-label">This week</h1>
+        <div class="week-nav">
+          <button class="btn icon ghost" id="prev-week" aria-label="Previous week">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <button class="btn ghost small" id="today">Today</button>
+          <button class="btn icon ghost" id="next-week" aria-label="Next week">
+            <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="days" id="days" role="tablist"></div>
+    </section>
+
+    <section class="toolbar">
+      <div class="search">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="search" type="search" placeholder="Search classes" autocomplete="off" />
+      </div>
+      <div class="segmented" role="radiogroup" aria-label="Filter">
+        <button role="radio" aria-checked="true" data-filter="all">All</button>
+        <button role="radio" aria-checked="false" data-filter="full">Full</button>
+        <button role="radio" aria-checked="false" data-filter="open">Open</button>
+      </div>
+    </section>
+
+    <section id="list" class="list" aria-live="polite"></section>
+  </main>
+
+  <!-- Watching drawer -->
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+    <div class="drawer-head">
+      <h2 id="drawer-title">Watching</h2>
+      <button class="btn icon ghost" data-close aria-label="Close">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p class="muted small-text" id="drawer-sub">You'll get a push the moment a spot opens.</p>
+    <ul class="watch-list" id="watch-list"></ul>
+  </aside>
+
+  <!-- Settings -->
+  <dialog class="modal" id="settings">
+    <form method="dialog" id="settings-form">
+      <h2>Settings</h2>
+      <p class="muted small-text">The access key protects your watch list. It's the <code>ACCESS_KEY</code> secret you set when deploying, and it's remembered on this device.</p>
+      <label class="field">
+        <span>Access key</span>
+        <input id="access-key" type="password" autocomplete="current-password" required />
+      </label>
+      <p class="form-msg" id="settings-msg" role="status"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="test-notify">Send test push</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" value="cancel" id="settings-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="settings-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "poll_seconds": 60,
+  "watch": [
+    { "name": "HYROX simulation", "date": "2026-11-29", "time": "08:30" }
+  ]
+}

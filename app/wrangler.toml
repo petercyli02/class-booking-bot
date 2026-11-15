@@ -1,0 +1,22 @@
+name = "class-watch"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# UI files in ./public are served directly; /api/* falls through to the Worker.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+# Check watched classes every minute (free plan allows this).
+[triggers]
+crons = ["* * * * *"]
+
+# Create with: npx wrangler kv namespace create WATCH_KV  -> paste the id here.
+[[kv_namespaces]]
+binding = "WATCH_KV"
+id = "REPLACE_WITH_KV_ID"
+
+# Secrets (not in this file):
+#   npx wrangler secret put ACCESS_KEY   - passphrase the UI needs to add/remove watches
+#   npx wrangler secret put NTFY_TOPIC   - your ntfy topic
