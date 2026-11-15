@@ -86,6 +86,7 @@ async function loadWeek() {
   try {
     const { classes } = await api(
       `/api/classes?provider=${encodeURIComponent(state.provider.id)}&from=${state.weekStart}&to=${addDays(state.weekStart, 6)}`,
+      { auth: true },
     );
     state.classes.set(key, classes);
     // Nothing left today? Jump to the next day with classes (next week if needed, e.g. Sunday evening).
@@ -97,6 +98,7 @@ async function loadWeek() {
     }
   } catch (e) {
     state.classes.delete(key);
+    if (e.status === 401) return lock("Your saved key no longer works.");
     $("#list").innerHTML = `<div class="empty"><strong>Couldn't load classes</strong>${escapeHtml(e.message)}</div>`;
     return;
   }
@@ -118,7 +120,7 @@ async function refreshMe() {
     }
     return data;
   } catch (e) {
-    if (e.status === 401) signOut(false);
+    if (e.status === 401) lock("Your saved key no longer works.");
     throw e;
   }
 }
@@ -137,6 +139,61 @@ async function loadWatches() {
     if (e.status === 401) state.me = null;
   }
   render();
+}
+
+// ------------------------------------------------------------ lock screen ---
+
+function lock(msg = "") {
+  signOut();
+  if ($("#settings").open) $("#settings").close();
+  closeDrawer();
+  document.body.classList.add("locked");
+  const m = $("#gate-msg");
+  m.textContent = msg;
+  m.className = `form-msg ${msg ? "err" : ""}`;
+  $("#gate-key").value = "";
+  $("#gate-key").focus();
+}
+
+/** Loads everything that needs a key. Throws (status 401) if the key is wrong. */
+async function startApp() {
+  state.providers = await api("/api/providers", { auth: true });
+  const saved = store.get("cw:provider");
+  state.provider = state.providers.find((p) => p.id === saved) || state.providers[0];
+  $("#provider").innerHTML = state.providers
+    .map((p) => `<option value="${p.id}" ${p.id === state.provider.id ? "selected" : ""}>${escapeHtml(p.name)} · ${escapeHtml(p.location)}</option>`)
+    .join("");
+  document.body.classList.remove("locked");
+  setWeek(mondayOf(localDay()));
+  const me = await refreshMe().catch(() => null);
+  loadWatches();
+  return me;
+}
+
+async function unlock(e) {
+  e.preventDefault();
+  const key = $("#gate-key").value.trim();
+  const msg = $("#gate-msg");
+  if (!key) {
+    msg.textContent = "Enter the access key.";
+    msg.className = "form-msg err";
+    return;
+  }
+  $("#gate-submit").disabled = true;
+  state.key = key;
+  try {
+    const me = await startApp();
+    store.set("cw:key", key);
+    // New friend: go straight to creating a profile.
+    if (me?.needsProfile) openSettings();
+  } catch (err) {
+    state.key = null;
+    document.body.classList.add("locked");
+    msg.textContent = err.status === 401 ? "That key didn't work." : err.message;
+    msg.className = "form-msg err";
+  } finally {
+    $("#gate-submit").disabled = false;
+  }
 }
 
 function signOut(clearKey = true) {
@@ -331,8 +388,7 @@ function renderSettings(needsProfile = false) {
   $("#profile-me").hidden = !me;
   $("#sec-notify").hidden = !me;
   $("#test-notify").hidden = !me;
-  $("#sign-out").hidden = !state.key;
-  $("#key-continue").hidden = Boolean(me);
+  $("#key-summary").textContent = me?.user.isOwner ? "Owner key saved on this device" : "Access key saved on this device";
   if (!me) return;
 
   $("#me-name").textContent = me.user.name;
@@ -351,24 +407,36 @@ function renderSettings(needsProfile = false) {
 
   // Owner-only. The server only sends `email` to the owner, so others never see this row.
   $("#opt-email").hidden = !me.email;
-  if (me.email) $("#ch-email").checked = me.email.enabled;
+  if (me.email) {
+    $("#ch-email").checked = me.email.enabled && me.email.configured;
+    $("#ch-email").disabled = !me.email.configured;
+    const se = $("#st-email");
+    se.className = `option-status ${me.email.configured ? "ready" : "todo"}`;
+    se.textContent = me.email.configured ? "Sends to your EMAIL_TO address" : "Needs RESEND_API_KEY + EMAIL_TO secrets";
+  }
+}
+
+function showKeyEdit(show) {
+  $("#key-view").hidden = show;
+  $("#key-edit").hidden = !show;
+  $("#access-key").value = "";
+  if (show) $("#access-key").focus();
 }
 
 async function openSettings(msg = "") {
-  $("#access-key").value = state.key || "";
+  if (!state.key) return lock();
+  showKeyEdit(false);
   $("#profile-name").value = "";
   $("#restore-row").hidden = true;
   $("#tg-help").hidden = true;
   setMsg(msg, msg ? "err" : "");
   renderSettings(false);
   $("#settings").showModal();
-  if (!state.key) return $("#access-key").focus();
   try {
     const data = await refreshMe();
     renderSettings(Boolean(data?.needsProfile));
   } catch (e) {
-    setMsg(e.status === 401 ? "Your saved key no longer works." : e.message, "err");
-    renderSettings(false);
+    if (e.status !== 401) setMsg(e.message, "err");
   }
 }
 
@@ -390,21 +458,27 @@ function afterSignIn() {
   }
 }
 
-async function continueWithKey() {
+/** Settings > Access key > Change: verify the new key before replacing the saved one. */
+async function changeKey() {
   const key = $("#access-key").value.trim();
-  if (!key) return setMsg("Enter the access key.", "err");
-  const prev = state.key;
+  if (!key) return setMsg("Enter the new key.", "err");
+  if (key === state.key) return showKeyEdit(false);
+  const prev = { key: state.key, me: state.me };
   state.key = key;
   try {
-    const data = await refreshMe();
+    const data = await api("/api/me", { auth: true });
     store.set("cw:key", key);
-    setMsg(data.needsProfile ? "Key accepted. Now create your profile." : `Signed in as ${state.me.user.name}.`, "ok");
+    state.me = data.needsProfile ? null : data;
+    state.classes.clear();
+    loadWeek();
+    loadWatches();
+    showKeyEdit(false);
     renderSettings(Boolean(data.needsProfile));
-    if (data.needsProfile) $("#profile-name").focus();
-    else afterSignIn();
+    setMsg(data.needsProfile ? "Key updated. Create your profile below." : `Key updated - signed in as ${data.user.name}.`, "ok");
   } catch (e) {
-    state.key = prev;
-    setMsg(e.status === 401 ? "That key didn't work." : e.message, "err");
+    state.key = prev.key;
+    state.me = prev.me;
+    setMsg(e.status === 401 ? "That key didn't work - your old key is still saved." : e.message, "err");
   }
 }
 
@@ -512,11 +586,9 @@ function channelsFromForm() {
 
 async function saveAndClose(e) {
   e.preventDefault();
-  if (!state.me) {
-    // Enter in the key field = Continue.
-    if (!state.key || $("#access-key").value.trim() !== state.key) return continueWithKey();
-    return closeSettings();
-  }
+  // Enter while editing the key = Save key.
+  if (!$("#key-edit").hidden && $("#access-key").value.trim()) return changeKey();
+  if (!state.me) return closeSettings();
   const ch = channelsFromForm();
   if (!ch.telegram.enabled && !ch.email?.enabled) return setMsg("Turn on at least one channel, or you won't get alerts.", "err");
   try {
@@ -612,7 +684,13 @@ function bind() {
   $("#open-settings").addEventListener("click", () => openSettings());
   $("#settings-form").addEventListener("submit", saveAndClose);
   $("#settings").addEventListener("close", () => clearInterval(tgPoll));
-  $("#key-continue").addEventListener("click", continueWithKey);
+  $("#gate-form").addEventListener("submit", unlock);
+  $("#key-change").addEventListener("click", () => showKeyEdit(true));
+  $("#key-cancel").addEventListener("click", () => {
+    showKeyEdit(false);
+    setMsg("");
+  });
+  $("#key-save").addEventListener("click", changeKey);
   $("#profile-create").addEventListener("click", createProfile);
   $("#profile-name").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -634,16 +712,11 @@ function bind() {
     } catch {}
   });
   $("#test-notify").addEventListener("click", testNotify);
-  $("#sign-out").addEventListener("click", () => {
-    signOut();
-    $("#access-key").value = "";
-    setMsg("Signed out on this device.", "ok");
-    renderSettings(false);
-  });
+  $("#sign-out").addEventListener("click", () => lock("Locked. Enter a key to continue."));
 
   // Refresh availability when coming back to the tab.
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && state.provider) {
+    if (document.visibilityState === "visible" && state.provider && state.key) {
       state.classes.delete(weekKey());
       loadWeek();
     }
@@ -652,22 +725,16 @@ function bind() {
 
 async function init() {
   bind();
+  if (!state.key) return lock();
   try {
-    state.providers = await api("/api/providers");
+    await startApp();
   } catch (e) {
-    $("#list").innerHTML = `<div class="empty"><strong>Couldn't start</strong>${escapeHtml(e.message)}</div>`;
-    return;
+    if (e.status === 401) lock("Your saved key no longer works.");
+    else {
+      document.body.classList.remove("locked");
+      $("#list").innerHTML = `<div class="empty"><strong>Couldn't start</strong>${escapeHtml(e.message)}</div>`;
+    }
   }
-  const saved = store.get("cw:provider");
-  state.provider = state.providers.find((p) => p.id === saved) || state.providers[0];
-  $("#provider").innerHTML = state.providers
-    .map((p) => `<option value="${p.id}" ${p.id === state.provider.id ? "selected" : ""}>${escapeHtml(p.name)} · ${escapeHtml(p.location)}</option>`)
-    .join("");
-  setWeek(mondayOf(localDay()));
-  try {
-    await refreshMe();
-  } catch {}
-  loadWatches();
 }
 
 init();

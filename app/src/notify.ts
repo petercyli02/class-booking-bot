@@ -58,9 +58,13 @@ export async function notifyRecipient(env: NotifyEnv, r: Recipient, n: Notificat
           : telegram(env.TELEGRAM_BOT_TOKEN!.trim(), chatId, n),
     );
   }
-  // Owner-only, and invisible unless RESEND_API_KEY + EMAIL_TO are set.
-  if (r.is_owner && r.notify_email && emailReady(env)) {
-    jobs.push(email(env.RESEND_API_KEY!.trim(), env.EMAIL_FROM?.trim() || "classwatch <onboarding@resend.dev>", env.EMAIL_TO!.trim(), n));
+  // Owner-only.
+  if (r.is_owner && r.notify_email) {
+    jobs.push(
+      emailReady(env)
+        ? email(env.RESEND_API_KEY!.trim(), env.EMAIL_FROM?.trim() || "classwatch <onboarding@resend.dev>", env.EMAIL_TO!.trim(), n)
+        : Promise.resolve({ channel: "email", ok: false, detail: "RESEND_API_KEY and EMAIL_TO secrets aren't both set on the Worker" }),
+    );
   }
 
   if (!jobs.length) return { ok: false, results: [], detail: "no notification channel is turned on" };

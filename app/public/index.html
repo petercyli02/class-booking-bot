@@ -11,7 +11,20 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
+<body class="locked">
+  <!-- Lock screen: nothing works without a key -->
+  <section class="gate" id="gate" aria-labelledby="gate-title">
+    <form class="gate-card" id="gate-form" novalidate>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>classwatch</span></div>
+      <h1 id="gate-title">Enter access key</h1>
+      <p class="muted small-text">This app is private. Ask whoever runs it for the access key.</p>
+      <label class="sr-only" for="gate-key">Access key</label>
+      <input class="input" id="gate-key" type="password" autocomplete="current-password" placeholder="Access key" required />
+      <p class="form-msg" id="gate-msg" role="status"></p>
+      <button type="submit" class="btn primary block" id="gate-submit">Unlock</button>
+    </form>
+  </section>
+
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"></span>
@@ -85,11 +98,17 @@
 
       <section class="settings-section">
         <h3>Access key</h3>
-        <p class="muted small-text">Ask whoever runs this app for the access key. It's remembered on this device.</p>
-        <div class="row">
-          <label class="sr-only" for="access-key">Access key</label>
-          <input class="input" id="access-key" type="password" autocomplete="current-password" placeholder="Access key" />
-          <button type="button" class="btn primary" id="key-continue">Continue</button>
+        <div class="key-view" id="key-view">
+          <span class="option-status ready" id="key-summary">Key saved on this device</span>
+          <button type="button" class="btn ghost small" id="key-change">Change</button>
+        </div>
+        <div id="key-edit" hidden>
+          <div class="row">
+            <label class="sr-only" for="access-key">New key</label>
+            <input class="input" id="access-key" type="password" autocomplete="current-password" placeholder="New access or owner key" />
+            <button type="button" class="btn primary" id="key-save">Save</button>
+          </div>
+          <button type="button" class="link" id="key-cancel">Cancel</button>
         </div>
       </section>
 
@@ -139,8 +158,8 @@
         <div class="option" id="opt-email" hidden>
           <input type="checkbox" id="ch-email" />
           <label for="ch-email" class="option-body">
-            <span class="option-title">Email</span>
-            <span class="option-status ready">Owner only</span>
+            <span class="option-title">Email <span class="badge">Owner only</span></span>
+            <span class="option-status" id="st-email"></span>
           </label>
         </div>
       </section>
@@ -149,7 +168,7 @@
       <div class="modal-actions">
         <button type="button" class="btn ghost" id="test-notify" hidden>Send test</button>
         <span class="spacer"></span>
-        <button type="button" class="btn ghost" id="sign-out" hidden>Sign out</button>
+        <button type="button" class="btn ghost" id="sign-out">Lock</button>
         <button type="submit" class="btn primary" id="settings-done">Done</button>
       </div>
     </form>

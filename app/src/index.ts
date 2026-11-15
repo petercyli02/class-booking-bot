@@ -81,7 +81,7 @@ function profile(env: Env, user: User) {
       enabled: user.notify_telegram === 1,
     },
     // Owner-only. Never present for anyone else, so their UI can't even show it.
-    ...(isOwner && emailReady(env) ? { email: { enabled: user.notify_email === 1 } } : {}),
+    ...(isOwner ? { email: { enabled: user.notify_email === 1, configured: emailReady(env) } } : {}),
     maxWatches: MAX_WATCHES_PER_USER,
   };
 }
@@ -95,7 +95,11 @@ async function handleApi(req: Request, env: Env, ctx: ExecutionContext): Promise
   const path = url.pathname.replace(/\/+$/, "");
   const method = req.method;
 
-  // ----- public -----
+  // Nothing is public: every API call needs the access key or the owner key.
+  const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (!safeEqual(bearer, env.ACCESS_KEY) && !safeEqual(bearer, env.OWNER_KEY)) return error("invalid access key", 401);
+
+  // ----- timetable (any valid key) -----
   if (path === "/api/providers" && method === "GET") {
     return json([...providers.values()].map(({ id, name, location, timezone }) => ({ id, name, location, timezone })));
   }
@@ -113,7 +117,7 @@ async function handleApi(req: Request, env: Env, ctx: ExecutionContext): Promise
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
     try {
-      const res = json({ classes: await provider.listClasses(from, to) }, 200, { "cache-control": "public, max-age=30" });
+      const res = json({ classes: await provider.listClasses(from, to) }, 200, { "cache-control": "private, max-age=30" });
       ctx.waitUntil(cache.put(cacheKey, res.clone()));
       return res;
     } catch (e) {
