@@ -3,7 +3,7 @@
 Get a push notification the moment a full fitness class has a free spot.
 
 - **Web app** (`app/`): browse a studio's timetable, tap the bell on the classes you want, and a
-  Cloudflare cron job checks them every minute and pings your phone via [ntfy](https://ntfy.sh)
+  Cloudflare cron job checks them every minute and pings your phone via a Telegram bot (or [ntfy](https://ntfy.sh))
   with a "Book now" link. Runs entirely on Cloudflare's free plan.
 - **CLI** (`watcher.py`): the original single-file Python version, handy for `list`-ing classes.
 
@@ -33,10 +33,17 @@ npm install
 npx wrangler login
 npx wrangler kv namespace create WATCH_KV     # paste the id into wrangler.toml
 npx wrangler secret put ACCESS_KEY            # any long passphrase - the UI asks for it
-npx wrangler secret put NTFY_TOPIC            # your private ntfy topic
+npx wrangler secret put TELEGRAM_BOT_TOKEN    # see "Notifications" below
+npx wrangler secret put TELEGRAM_CHAT_ID
 npx wrangler deploy
 ```
 Open the `*.workers.dev` URL, go to Settings, enter your access key and tap **Send test push**.
+
+### Notifications
+Every configured channel is tried, and an alert counts as sent if any one of them succeeds.
+- **Telegram (recommended):** message @BotFather, send `/newbot`, and put the token in `TELEGRAM_BOT_TOKEN`.
+  Send your new bot any message, then open the app's Settings and tap **Find Telegram chat ID**. Put that number in `TELEGRAM_CHAT_ID`.
+- **ntfy:** `NTFY_TOPIC`. This works locally, but ntfy.sh returned 522 (timeout) when called from Cloudflare Workers.
 
 ### Local dev
 ```bash

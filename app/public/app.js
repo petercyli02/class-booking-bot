@@ -315,6 +315,26 @@ async function testNotify() {
   }
 }
 
+async function findTelegramChats() {
+  const key = $("#access-key").value.trim();
+  if (!key) return setMsg("Enter your access key first.", "err");
+  const prev = state.key;
+  state.key = key;
+  try {
+    const { chats } = await api("/api/telegram-chats", { auth: true });
+    setMsg(
+      chats.length
+        ? `TELEGRAM_CHAT_ID: ${chats.map((c) => `${c.id} (${c.name})`).join(", ")}`
+        : "No chats yet - send your bot any message in Telegram, then try again.",
+      chats.length ? "ok" : "err",
+    );
+  } catch (err) {
+    setMsg(err.message, "err");
+  } finally {
+    state.key = prev;
+  }
+}
+
 // --------------------------------------------------------------- drawer ---
 
 function openDrawer() {
@@ -389,6 +409,7 @@ function bind() {
     $("#settings").close();
   });
   $("#test-notify").addEventListener("click", testNotify);
+  $("#tg-chats").addEventListener("click", findTelegramChats);
 
   // Refresh availability when coming back to the tab.
   document.addEventListener("visibilitychange", () => {

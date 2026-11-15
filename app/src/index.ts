@@ -1,4 +1,4 @@
-import { notify } from "./notify";
+import { notify, telegramChats } from "./notify";
 import { providers } from "./providers";
 import type { FitnessClass } from "./providers/types";
 import {
@@ -17,6 +17,8 @@ export interface Env {
   WATCH_KV: KVNamespace;
   ACCESS_KEY?: string;
   NTFY_TOPIC?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -83,19 +85,29 @@ async function handleApi(req: Request, env: Env, ctx: ExecutionContext): Promise
   }
 
   // Everything below changes or reveals your watch list -> needs the access key.
-  if (path.startsWith("/api/watches") || path === "/api/auth" || path === "/api/test-notify") {
+  if (path.startsWith("/api/watches") || ["/api/auth", "/api/test-notify", "/api/telegram-chats"].includes(path)) {
     if (!authorised(req, env)) return error("invalid access key", 401);
   }
 
   if (path === "/api/auth" && req.method === "GET") return json({ ok: true, maxWatches: MAX_WATCHES });
 
   if (path === "/api/test-notify" && req.method === "POST") {
-    const result = await notify(env.NTFY_TOPIC, {
+    const result = await notify(env, {
       title: "Class watch test",
       body: "Notifications are working.",
       link: url.origin,
     });
     return result.ok ? json({ ok: true }) : error(`Push failed - ${result.detail}`, 502);
+  }
+
+  // Setup helper: after messaging your bot, this lists chats so you can find TELEGRAM_CHAT_ID.
+  if (path === "/api/telegram-chats" && req.method === "GET") {
+    if (!env.TELEGRAM_BOT_TOKEN) return error("set the TELEGRAM_BOT_TOKEN secret first", 400);
+    try {
+      return json({ chats: await telegramChats(env.TELEGRAM_BOT_TOKEN) });
+    } catch (e) {
+      return error(`Telegram: ${(e as Error).message}`, 502);
+    }
   }
 
   if (path === "/api/watches" && req.method === "GET") {
@@ -197,7 +209,7 @@ async function checkWatches(env: Env): Promise<void> {
           hour: "2-digit",
           minute: "2-digit",
         }).format(new Date(c.start));
-        const { ok: sent } = await notify(env.NTFY_TOPIC, {
+        const { ok: sent } = await notify(env, {
           title: `Space at ${provider.name}: ${c.name}`,
           body: `${when} - ${c.spots} spot${c.spots === 1 ? "" : "s"} free. Book fast!`,
           link: c.bookUrl,
