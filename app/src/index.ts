@@ -60,7 +60,7 @@ type Caller = { role: "none" } | { role: "access" } | { role: "owner" | "user"; 
 
 /**
  * Authorization: Bearer <ACCESS_KEY | OWNER_KEY>
- * X-User-Token:  <personal token>   (friends only; identifies whose watch list it is)
+ * X-User-Token:  <personal token>   (non-owner users; identifies whose watch list it is)
  */
 async function identify(req: Request, env: Env): Promise<Caller> {
   const key = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();

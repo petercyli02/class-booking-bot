@@ -20,8 +20,8 @@ database_name = "classwatch"
 database_id = "ac2402e2-9665-4b39-afe0-70b2c6143f53"
 
 # Secrets (Worker > Settings > Variables and Secrets, type Secret - not in this file):
-#   ACCESS_KEY          - shared with friends; opens the app
-#   OWNER_KEY           - only you; use it instead of ACCESS_KEY to be the owner
+#   ACCESS_KEY          - shared with the app's users; unlocks the app
+#   OWNER_KEY           - known only to the owner; unlocks the app as the owner (enables email)
 #   TELEGRAM_BOT_TOKEN  - from @BotFather; everyone connects their own chat in Settings
 #   RESEND_API_KEY      - owner-only email (optional)
 #   EMAIL_TO            - owner's address (optional; email is hidden unless this + RESEND_API_KEY are set)

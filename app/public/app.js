@@ -20,7 +20,7 @@ const state = {
   filter: "all",
   query: "",
   key: store.get("cw:key"),        // ACCESS_KEY or OWNER_KEY
-  token: store.get("cw:token"),    // personal token (friends only)
+  token: store.get("cw:token"),    // personal token (non-owner users)
   me: null,                        // profile once signed in
   pending: null,                   // action to resume after signing in
 };
@@ -184,7 +184,7 @@ async function unlock(e) {
   try {
     const me = await startApp();
     store.set("cw:key", key);
-    // New friend: go straight to creating a profile.
+    // New user: go straight to creating a profile.
     if (me?.needsProfile) openSettings();
   } catch (err) {
     state.key = null;
