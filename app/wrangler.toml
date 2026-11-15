@@ -15,6 +15,7 @@ crons = ["* * * * *"]
 # Create with: npx wrangler kv namespace create WATCH_KV  -> paste the id here.
 [[kv_namespaces]]
 binding = "WATCH_KV"
+
 id = "5fb7bc4b4141463abd3d0d3e8d253fac"
 
 # Secrets (not in this file):

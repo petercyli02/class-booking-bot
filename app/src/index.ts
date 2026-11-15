@@ -90,12 +90,12 @@ async function handleApi(req: Request, env: Env, ctx: ExecutionContext): Promise
   if (path === "/api/auth" && req.method === "GET") return json({ ok: true, maxWatches: MAX_WATCHES });
 
   if (path === "/api/test-notify" && req.method === "POST") {
-    const ok = await notify(env.NTFY_TOPIC, {
+    const result = await notify(env.NTFY_TOPIC, {
       title: "Class watch test",
       body: "Notifications are working.",
       link: url.origin,
     });
-    return ok ? json({ ok }) : error("notification failed - is NTFY_TOPIC set?", 500);
+    return result.ok ? json({ ok: true }) : error(`Push failed - ${result.detail}`, 502);
   }
 
   if (path === "/api/watches" && req.method === "GET") {
@@ -197,7 +197,7 @@ async function checkWatches(env: Env): Promise<void> {
           hour: "2-digit",
           minute: "2-digit",
         }).format(new Date(c.start));
-        const sent = await notify(env.NTFY_TOPIC, {
+        const { ok: sent } = await notify(env.NTFY_TOPIC, {
           title: `Space at ${provider.name}: ${c.name}`,
           body: `${when} - ${c.spots} spot${c.spots === 1 ? "" : "s"} free. Book fast!`,
           link: c.bookUrl,
