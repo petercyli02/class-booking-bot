@@ -99,7 +99,7 @@ export async function getBotUsername(token: string): Promise<string> {
   return (botUsername = data.result.username);
 }
 
-/** Looks for "/start <code>" sent to the bot and returns that chat's id. */
+/** Looks for "/start <code>" (or just the code) sent to the bot and returns that chat's id. */
 export async function findChatForCode(token: string, code: string): Promise<string | null> {
   const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates?allowed_updates=%5B%22message%22%5D`);
   const data = (await res.json()) as {
@@ -109,7 +109,8 @@ export async function findChatForCode(token: string, code: string): Promise<stri
   };
   if (!data.ok) throw new Error(data.description ?? "Telegram error");
   for (const u of (data.result ?? []).reverse()) {
-    if (u.message?.text?.trim() === `/start ${code}`) return String(u.message.chat.id);
+    const text = (u.message?.text ?? "").trim().replace(/^\/start(@\w+)?\s+/i, "");
+    if (u.message && text === code) return String(u.message.chat.id);
   }
   return null;
 }

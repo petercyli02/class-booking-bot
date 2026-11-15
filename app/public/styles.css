@@ -244,7 +244,9 @@ code { font-size: 0.9em; background: var(--surface-2); padding: 1px 5px; border-
   border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-size: 13px;
   color: var(--accent-text); font-weight: 500; text-decoration: underline; text-underline-offset: 2px;
 }
-#tg-link { display: inline-block; margin: -2px 0 8px; }
+.tg-help { margin: -2px 0 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.tg-help p { margin: 0 0 8px; }
+.tg-msg { flex: 1; min-width: 0; display: flex; align-items: center; padding: 6px 10px; border-radius: 8px; overflow-wrap: anywhere; background: var(--surface); }
 .me { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 4px; }
 .badge {
   font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;

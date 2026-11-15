@@ -344,7 +344,7 @@ async function openSettings(msg = "") {
   $("#access-key").value = state.key || "";
   $("#profile-name").value = "";
   $("#restore-row").hidden = true;
-  $("#tg-link").hidden = true;
+  $("#tg-help").hidden = true;
   setMsg(msg, msg ? "err" : "");
   renderSettings(false);
   $("#settings").showModal();
@@ -453,25 +453,28 @@ async function toggleTelegram() {
 
   // Open the window synchronously (inside the click) so popup blockers allow it.
   const win = window.open("about:blank", "_blank");
-  let url;
+  let link;
   try {
-    ({ url } = await api("/api/telegram/link", { method: "POST", auth: true }));
+    link = await api("/api/telegram/link", { method: "POST", auth: true });
   } catch (e) {
     win?.close();
     return setMsg(e.message, "err");
   }
-  if (win) win.location.href = url;
-  const link = $("#tg-link");
-  link.href = url;
-  link.hidden = false;
-  setMsg("In Telegram, press Start. This will update automatically.");
+  if (win) win.location.href = link.url;
+  // Fallback for browsers without the Telegram app: send the code by hand.
+  $("#tg-web").href = `https://web.telegram.org/k/#@${link.bot}`;
+  $("#tg-bot").textContent = `@${link.bot}`;
+  $("#tg-msg").textContent = link.message;
+  const help = $("#tg-help");
+  help.hidden = false;
+  setMsg("Waiting for you to press Start in Telegram - this updates automatically.");
 
   clearInterval(tgPoll);
   const started = Date.now();
   tgPoll = setInterval(async () => {
-    if (!$("#settings").open || Date.now() - started > 180_000) {
+    if (!$("#settings").open || Date.now() - started > 300_000) {
       clearInterval(tgPoll);
-      if ($("#settings").open && !state.me?.telegram.connected) setMsg("Didn't see you press Start. Tap Connect to try again.", "err");
+      if ($("#settings").open && !state.me?.telegram.connected) setMsg("Didn't hear from Telegram. Tap Connect to get a new code.", "err");
       return;
     }
     try {
@@ -479,7 +482,7 @@ async function toggleTelegram() {
       if (!connected) return;
       clearInterval(tgPoll);
       await refreshMe();
-      link.hidden = true;
+      help.hidden = true;
       setMsg("Telegram connected - check your chat for a confirmation.", "ok");
       renderSettings(false);
     } catch {}
@@ -610,6 +613,12 @@ function bind() {
   $("#restore-go").addEventListener("click", restoreProfile);
   $("#copy-token").addEventListener("click", copyToken);
   $("#tg-connect").addEventListener("click", toggleTelegram);
+  $("#tg-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("#tg-msg").textContent);
+      toast("Copied - paste it into the bot chat");
+    } catch {}
+  });
   $("#test-notify").addEventListener("click", testNotify);
   $("#sign-out").addEventListener("click", () => {
     signOut();

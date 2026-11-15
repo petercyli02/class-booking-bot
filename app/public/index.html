@@ -127,7 +127,15 @@
           </label>
           <button type="button" class="btn ghost small" id="tg-connect">Connect</button>
         </div>
-        <a class="link small-text" id="tg-link" href="#" target="_blank" rel="noopener" hidden>Telegram didn't open? Tap here.</a>
+        <div class="tg-help" id="tg-help" hidden>
+          <p class="small-text muted">Start button did nothing? It needs the Telegram app. Instead, open
+            <a class="link" id="tg-web" href="#" target="_blank" rel="noopener">Telegram Web</a> or Telegram on your phone,
+            find <strong id="tg-bot"></strong> and send:</p>
+          <div class="row">
+            <code class="tg-msg" id="tg-msg"></code>
+            <button type="button" class="btn ghost small" id="tg-copy">Copy</button>
+          </div>
+        </div>
         <div class="option" id="opt-email" hidden>
           <input type="checkbox" id="ch-email" />
           <label for="ch-email" class="option-body">

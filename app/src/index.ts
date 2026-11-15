@@ -175,7 +175,8 @@ async function handleApi(req: Request, env: Env, ctx: ExecutionContext): Promise
     try {
       const code = randomToken(12);
       await updateUser(env.DB, user.id, { link_code: code });
-      return json({ url: `https://t.me/${await getBotUsername(env.TELEGRAM_BOT_TOKEN!)}?start=${code}` });
+      const bot = await getBotUsername(env.TELEGRAM_BOT_TOKEN!);
+      return json({ url: `https://t.me/${bot}?start=${code}`, bot, message: `/start ${code}` });
     } catch (e) {
       return error(`Telegram: ${(e as Error).message}`, 502);
     }
