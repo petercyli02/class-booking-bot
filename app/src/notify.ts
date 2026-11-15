@@ -1,60 +1,92 @@
+import type { NotifySettings } from "./store";
+
 export interface Notification {
   title: string;
   body: string;
   link?: string;
 }
 
-export interface NotifyResult {
+export interface NotifyEnv {
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
+  RESEND_API_KEY?: string;
+  /** Optional. Without your own verified domain, Resend only allows onboarding@resend.dev. */
+  EMAIL_FROM?: string;
+}
+
+export type Channel = "telegram" | "email";
+
+export interface ChannelResult {
+  channel: Channel;
   ok: boolean;
-  /** Human-readable reason(s) when ok is false */
   detail?: string;
 }
 
-export interface NotifyEnv {
-  NTFY_TOPIC?: string;
-  TELEGRAM_BOT_TOKEN?: string;
-  TELEGRAM_CHAT_ID?: string;
+export interface NotifyResult {
+  ok: boolean;
+  results: ChannelResult[];
+  /** Human-readable summary when ok is false */
+  detail?: string;
 }
 
-/**
- * Sends via every configured channel. ok = at least one channel delivered.
- * Telegram is the recommended channel on Cloudflare (ntfy.sh can time out from Workers).
- */
-export async function notify(env: NotifyEnv, n: Notification): Promise<NotifyResult> {
-  const attempts: Promise<NotifyResult & { channel: string }>[] = [];
-  if (env.TELEGRAM_BOT_TOKEN?.trim() && env.TELEGRAM_CHAT_ID?.trim())
-    attempts.push(telegram(env.TELEGRAM_BOT_TOKEN.trim(), env.TELEGRAM_CHAT_ID.trim(), n).then((r) => ({ ...r, channel: "Telegram" })));
-  if (env.NTFY_TOPIC?.trim()) attempts.push(ntfy(env.NTFY_TOPIC, n).then((r) => ({ ...r, channel: "ntfy" })));
+/** Which channels have the secrets they need. */
+export function configured(env: NotifyEnv) {
+  return {
+    telegram: Boolean(env.TELEGRAM_BOT_TOKEN?.trim() && env.TELEGRAM_CHAT_ID?.trim()),
+    email: Boolean(env.RESEND_API_KEY?.trim()),
+  };
+}
 
-  if (!attempts.length) {
-    return { ok: false, detail: "no channel configured - set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (or NTFY_TOPIC) as runtime secrets" };
+/** Sends on every enabled channel. ok = at least one delivered. */
+export async function notify(env: NotifyEnv, settings: NotifySettings, n: Notification): Promise<NotifyResult> {
+  const ready = configured(env);
+  const jobs: Promise<ChannelResult>[] = [];
+
+  if (settings.telegram.enabled) {
+    jobs.push(
+      ready.telegram
+        ? telegram(env.TELEGRAM_BOT_TOKEN!.trim(), env.TELEGRAM_CHAT_ID!.trim(), n)
+        : Promise.resolve({ channel: "telegram", ok: false, detail: "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets not set" }),
+    );
   }
-  const results = await Promise.all(attempts);
-  if (results.some((r) => r.ok)) return { ok: true };
-  return { ok: false, detail: results.map((r) => `${r.channel}: ${r.detail}`).join("; ") };
+  if (settings.email.enabled) {
+    jobs.push(
+      !ready.email
+        ? Promise.resolve({ channel: "email", ok: false, detail: "RESEND_API_KEY secret not set" })
+        : !settings.email.to
+          ? Promise.resolve({ channel: "email", ok: false, detail: "no email address saved" })
+          : email(env.RESEND_API_KEY!.trim(), env.EMAIL_FROM?.trim() || "classwatch <onboarding@resend.dev>", settings.email.to, n),
+    );
+  }
+
+  if (!jobs.length) return { ok: false, results: [], detail: "no notification channel is ticked in Settings" };
+  const results = await Promise.all(jobs);
+  const ok = results.some((r) => r.ok);
+  const detail = ok ? undefined : results.map((r) => `${r.channel}: ${r.detail}`).join("; ");
+  return { ok, results, detail };
 }
 
 // ------------------------------------------------------------- telegram ---
 
-async function telegram(token: string, chatId: string, n: Notification): Promise<NotifyResult> {
+async function telegram(token: string, chatId: string, n: Notification): Promise<ChannelResult> {
   const payload: Record<string, unknown> = {
     chat_id: chatId,
     text: `${n.title}\n${n.body}`,
     disable_web_page_preview: true,
   };
-  if (n.link) payload.reply_markup = { inline_keyboard: [[{ text: "Book now", url: n.link }]] };
+  if (n.link?.startsWith("https://")) payload.reply_markup = { inline_keyboard: [[{ text: "Book now", url: n.link }]] };
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (res.ok) return { ok: true };
+    if (res.ok) return { channel: "telegram", ok: true };
     const data = (await res.json().catch(() => ({}))) as { description?: string };
     console.error(`telegram ${res.status}: ${data.description ?? ""}`);
-    return { ok: false, detail: `replied ${res.status}${data.description ? `: ${data.description}` : ""}` };
+    return { channel: "telegram", ok: false, detail: `Telegram replied ${res.status}${data.description ? `: ${data.description}` : ""}` };
   } catch (e) {
-    return { ok: false, detail: `unreachable: ${(e as Error).message}` };
+    return { channel: "telegram", ok: false, detail: `Telegram unreachable: ${(e as Error).message}` };
   }
 }
 
@@ -75,28 +107,33 @@ export async function telegramChats(token: string): Promise<{ id: number; name: 
   return [...chats].map(([id, name]) => ({ id, name }));
 }
 
-// ----------------------------------------------------------------- ntfy ---
+// ---------------------------------------------------------------- email ---
 
-/** Accepts "topic", " topic ", "ntfy.sh/topic" or "https://ntfy.sh/topic". */
-function cleanTopic(raw: string): string {
-  return raw.trim().replace(/^https?:\/\//i, "").replace(/^ntfy\.sh\//i, "").replace(/\/+$/, "");
-}
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
-async function ntfy(rawTopic: string, n: Notification): Promise<NotifyResult> {
-  const topic = cleanTopic(rawTopic);
-  if (!/^[\w-]{1,64}$/.test(topic)) return { ok: false, detail: "topic has invalid characters" };
-  const headers: Record<string, string> = { Title: n.title, Priority: "urgent", Tags: "runner" };
-  if (n.link) {
-    headers.Click = n.link;
-    headers.Actions = `view, Book now, ${n.link}`;
-  }
+async function email(apiKey: string, from: string, to: string, n: Notification): Promise<ChannelResult> {
+  const html = `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5">
+    <p style="margin:0 0 4px;font-weight:600">${esc(n.title)}</p>
+    <p style="margin:0 0 16px">${esc(n.body)}</p>
+    ${n.link ? `<a href="${esc(n.link)}" style="display:inline-block;background:#16a34a;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Book now</a>` : ""}
+  </div>`;
   try {
-    const res = await fetch(`https://ntfy.sh/${topic}`, { method: "POST", body: n.body, headers });
-    if (res.ok) return { ok: true };
-    const text = (await res.text().catch(() => "")).slice(0, 120);
-    console.error(`ntfy ${res.status}: ${text}`);
-    return { ok: false, detail: `replied ${res.status}${text ? `: ${text}` : ""}` };
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject: n.title,
+        text: `${n.body}${n.link ? `\n\nBook: ${n.link}` : ""}`,
+        html,
+      }),
+    });
+    if (res.ok) return { channel: "email", ok: true };
+    const data = (await res.json().catch(() => ({}))) as { message?: string };
+    console.error(`resend ${res.status}: ${data.message ?? ""}`);
+    return { channel: "email", ok: false, detail: `Resend replied ${res.status}${data.message ? `: ${data.message}` : ""}` };
   } catch (e) {
-    return { ok: false, detail: `unreachable: ${(e as Error).message}` };
+    return { channel: "email", ok: false, detail: `Resend unreachable: ${(e as Error).message}` };
   }
 }

@@ -1,6 +1,6 @@
 """Pace Club (bSport) class-space watcher.
 
-Polls bSport's public timetable API and notifies you (push via ntfy and/or email)
+Polls bSport's public timetable API and emails you
 the moment a full class you're watching gets a free spot.
 
 Usage:
@@ -113,20 +113,6 @@ def matches(c, rule):
 
 def notify(title, body, link=None):
     sent = False
-    topic = os.environ.get("NTFY_TOPIC")
-    if topic:
-        try:
-            headers = {"Title": title.encode("utf-8"), "Priority": "urgent", "Tags": "runner"}
-            if link:
-                headers["Click"] = link
-                headers["Actions"] = f"view, Book now, {link}"
-            server = os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
-            req = urllib.request.Request(f"{server}/{topic}", data=body.encode("utf-8"), headers=headers)
-            urllib.request.urlopen(req, timeout=15).read()
-            sent = True
-        except Exception as e:
-            log(f"ntfy failed: {e}")
-
     if os.environ.get("SMTP_USER") and os.environ.get("EMAIL_TO"):
         try:
             msg = EmailMessage()
@@ -144,7 +130,7 @@ def notify(title, body, link=None):
             log(f"email failed: {e}")
 
     if not sent:
-        log("WARNING: no notification channel worked - set NTFY_TOPIC and/or SMTP_* in .env")
+        log("WARNING: email not sent - set SMTP_USER, SMTP_PASSWORD and EMAIL_TO in .env")
     return sent
 
 

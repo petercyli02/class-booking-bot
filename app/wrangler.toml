@@ -18,8 +18,9 @@ binding = "WATCH_KV"
 
 id = "5fb7bc4b4141463abd3d0d3e8d253fac"
 
-# Secrets (not in this file):
-#   npx wrangler secret put ACCESS_KEY   - passphrase the UI needs to add/remove watches
-#   npx wrangler secret put TELEGRAM_BOT_TOKEN  - from @BotFather (recommended channel)
-#   npx wrangler secret put TELEGRAM_CHAT_ID    - Settings > "Find Telegram chat ID" in the UI
-#   npx wrangler secret put NTFY_TOPIC          - optional; ntfy.sh can time out (522) from Workers
+# Secrets (Worker > Settings > Variables and Secrets, type Secret - not in this file):
+#   ACCESS_KEY          - passphrase the UI needs to change watches/settings
+#   TELEGRAM_BOT_TOKEN  - from @BotFather
+#   TELEGRAM_CHAT_ID    - Settings > "Find chat ID" in the UI
+#   RESEND_API_KEY      - from resend.com (email)
+#   EMAIL_FROM          - optional; defaults to classwatch <onboarding@resend.dev>

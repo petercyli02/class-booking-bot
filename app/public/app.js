@@ -49,6 +49,7 @@ async function api(path, { method = "GET", body, auth = false } = {}) {
   if (!res.ok) {
     const err = new Error(data.error || `Request failed (${res.status})`);
     err.status = res.status;
+    err.data = data;
     throw err;
   }
   return data;
@@ -266,12 +267,8 @@ async function toggleWatch(key) {
 
 // ------------------------------------------------------------- settings ---
 
-function openSettings(msg = "") {
-  $("#access-key").value = state.key || "";
-  setMsg(msg, msg ? "err" : "");
-  $("#settings").showModal();
-  $("#access-key").focus();
-}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+let settingsLoaded = false;
 
 function setMsg(text, cls = "") {
   const el = $("#settings-msg");
@@ -279,59 +276,142 @@ function setMsg(text, cls = "") {
   el.className = `form-msg ${cls}`;
 }
 
-async function saveKey(e) {
-  e.preventDefault();
-  const key = $("#access-key").value.trim();
-  if (!key) return;
-  const prev = state.key;
-  state.key = key;
-  try {
-    await api("/api/auth", { auth: true });
-  } catch (err) {
-    state.key = prev;
-    return setMsg(err.status === 401 ? "That access key didn't work." : err.message, "err");
-  }
-  store.set("cw:key", key);
-  $("#settings").close();
-  await loadWatches();
-  const next = state.pending;
-  state.pending = null;
-  if (next) next();
-  else toast("Saved");
+function setStatus(id, ready, needs) {
+  const el = $(id);
+  el.className = `option-status ${ready ? "ready" : "todo"}`;
+  el.textContent = ready ? "Set up" : `Needs ${needs}`;
 }
 
-async function testNotify() {
+function showNotifyOptions(show) {
+  $("#notify-options").hidden = !show;
+  $("#notify-locked").hidden = show;
+  $("#test-notify").hidden = !show;
+}
+
+function syncEmailField() {
+  $("#email-to").disabled = !$("#ch-email").checked;
+}
+
+function fillSettings({ settings, configured }) {
+  $("#ch-telegram").checked = settings.telegram.enabled;
+  $("#ch-email").checked = settings.email.enabled;
+  $("#email-to").value = settings.email.to || "";
+  setStatus("#st-telegram", configured.telegram, "TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID");
+  setStatus("#st-email", configured.email, "RESEND_API_KEY");
+  $("#tg-chats").hidden = configured.telegram;
+  syncEmailField();
+  settingsLoaded = true;
+  showNotifyOptions(true);
+}
+
+function settingsFromForm() {
+  return {
+    telegram: { enabled: $("#ch-telegram").checked },
+    email: { enabled: $("#ch-email").checked, to: $("#email-to").value.trim() },
+  };
+}
+
+function validateForm() {
+  const s = settingsFromForm();
+  if (s.email.enabled && !EMAIL_RE.test(s.email.to)) return "Enter a valid email address, or untick Email.";
+  if (!s.telegram.enabled && !s.email.enabled) return "Tick at least one channel, or you won't get alerts.";
+  return "";
+}
+
+/** Run an API call with the key currently typed in the form. */
+async function withFormKey(fn) {
   const key = $("#access-key").value.trim();
-  if (!key) return setMsg("Enter your access key first.", "err");
+  if (!key) throw Object.assign(new Error("Enter your access key first."), { status: 0 });
   const prev = state.key;
   state.key = key;
   try {
-    await api("/api/test-notify", { method: "POST", auth: true });
-    setMsg("Sent - check your phone.", "ok");
-  } catch (err) {
-    setMsg(err.message, "err");
+    return await fn();
   } finally {
     state.key = prev;
   }
 }
 
-async function findTelegramChats() {
-  const key = $("#access-key").value.trim();
-  if (!key) return setMsg("Enter your access key first.", "err");
-  const prev = state.key;
-  state.key = key;
+async function openSettings(msg = "") {
+  $("#access-key").value = state.key || "";
+  setMsg(msg, msg ? "err" : "");
+  settingsLoaded = false;
+  showNotifyOptions(false);
+  $("#settings").showModal();
+  if (!state.key) return $("#access-key").focus();
   try {
-    const { chats } = await api("/api/telegram-chats", { auth: true });
+    fillSettings(await api("/api/settings", { auth: true }));
+  } catch (e) {
+    setMsg(e.status === 401 ? "Your saved access key no longer works." : e.message, "err");
+  }
+}
+
+async function saveSettings(e) {
+  e.preventDefault();
+  const key = $("#access-key").value.trim();
+  if (!key) return setMsg("Enter your access key.", "err");
+
+  // 1. New or unverified key: check it first.
+  if (key !== state.key || !settingsLoaded) {
+    let data;
+    try {
+      data = await withFormKey(() => api("/api/settings", { auth: true }));
+    } catch (err) {
+      return setMsg(err.status === 401 ? "That access key didn't work." : err.message, "err");
+    }
+    state.key = key;
+    store.set("cw:key", key);
+    loadWatches();
+    if (state.pending) {
+      const next = state.pending;
+      state.pending = null;
+      $("#settings").close();
+      return next();
+    }
+    if (!settingsLoaded) {
+      fillSettings(data);
+      return setMsg("Key saved. Now choose how to be notified.", "ok");
+    }
+  }
+
+  // 2. Save notification channels.
+  const problem = validateForm();
+  if (problem) return setMsg(problem, "err");
+  try {
+    await api("/api/settings", { method: "PUT", auth: true, body: settingsFromForm() });
+  } catch (err) {
+    return setMsg(err.message, "err");
+  }
+  $("#settings").close();
+  toast("Settings saved");
+}
+
+async function testNotify() {
+  const problem = validateForm();
+  if (problem) return setMsg(problem, "err");
+  setMsg("Sending...");
+  let data;
+  try {
+    data = await withFormKey(() => api("/api/test-notify", { method: "POST", auth: true, body: settingsFromForm() }));
+  } catch (err) {
+    data = err.data;
+    if (!data?.results) return setMsg(err.message, "err");
+  }
+  const names = { telegram: "Telegram", email: "Email" };
+  const parts = data.results.map((r) => `${names[r.channel]} ${r.ok ? "sent" : `failed: ${r.detail}`}`);
+  setMsg(parts.join(" · ") || data.detail, data.results.length && data.results.every((r) => r.ok) ? "ok" : "err");
+}
+
+async function findTelegramChats() {
+  try {
+    const { chats } = await withFormKey(() => api("/api/telegram-chats", { auth: true }));
     setMsg(
       chats.length
-        ? `TELEGRAM_CHAT_ID: ${chats.map((c) => `${c.id} (${c.name})`).join(", ")}`
-        : "No chats yet - send your bot any message in Telegram, then try again.",
+        ? `Your TELEGRAM_CHAT_ID: ${chats.map((c) => `${c.id} (${c.name})`).join(", ")}`
+        : "No chats yet. Send your bot any message in Telegram, then try again.",
       chats.length ? "ok" : "err",
     );
   } catch (err) {
     setMsg(err.message, "err");
-  } finally {
-    state.key = prev;
   }
 }
 
@@ -403,7 +483,8 @@ function bind() {
   });
 
   $("#open-settings").addEventListener("click", () => openSettings());
-  $("#settings-form").addEventListener("submit", saveKey);
+  $("#settings-form").addEventListener("submit", saveSettings);
+  $("#ch-email").addEventListener("change", syncEmailField);
   $("#settings-cancel").addEventListener("click", () => {
     state.pending = null;
     $("#settings").close();

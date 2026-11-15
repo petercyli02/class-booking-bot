@@ -80,20 +80,46 @@
 
   <!-- Settings -->
   <dialog class="modal" id="settings">
-    <form method="dialog" id="settings-form">
+    <form method="dialog" id="settings-form" novalidate>
       <h2>Settings</h2>
-      <p class="muted small-text">The access key protects your watch list. It's the <code>ACCESS_KEY</code> secret you set when deploying, and it's remembered on this device.</p>
-      <label class="field">
-        <span>Access key</span>
-        <input id="access-key" type="password" autocomplete="current-password" required />
-      </label>
+
+      <section class="settings-section">
+        <h3>Access key</h3>
+        <p class="muted small-text">The <code>ACCESS_KEY</code> secret you set on the Worker. It's remembered on this device.</p>
+        <label class="sr-only" for="access-key">Access key</label>
+        <input class="input" id="access-key" type="password" autocomplete="current-password" placeholder="Access key" />
+      </section>
+
+      <section class="settings-section">
+        <h3>Notify me via</h3>
+        <p class="muted small-text" id="notify-locked">Save your access key to choose notification channels.</p>
+        <div id="notify-options" hidden>
+          <div class="option">
+            <input type="checkbox" id="ch-telegram" />
+            <label for="ch-telegram" class="option-body">
+              <span class="option-title">Telegram</span>
+              <span class="option-status" id="st-telegram"></span>
+            </label>
+            <button type="button" class="btn ghost small" id="tg-chats">Find chat ID</button>
+          </div>
+          <div class="option">
+            <input type="checkbox" id="ch-email" />
+            <label for="ch-email" class="option-body">
+              <span class="option-title">Email</span>
+              <span class="option-status" id="st-email"></span>
+            </label>
+          </div>
+          <label class="sr-only" for="email-to">Email address</label>
+          <input class="input" id="email-to" type="email" autocomplete="email" placeholder="you@example.com" />
+        </div>
+      </section>
+
       <p class="form-msg" id="settings-msg" role="status"></p>
       <div class="modal-actions">
-        <button type="button" class="btn ghost" id="test-notify">Send test push</button>
-        <button type="button" class="btn ghost" id="tg-chats">Find Telegram chat ID</button>
+        <button type="button" class="btn ghost" id="test-notify" hidden>Send test</button>
         <span class="spacer"></span>
-        <button type="button" class="btn ghost" value="cancel" id="settings-cancel">Cancel</button>
-        <button type="submit" class="btn primary" id="settings-save">Save</button>
+        <button type="button" class="btn ghost" id="settings-cancel">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
       </div>
     </form>
   </dialog>

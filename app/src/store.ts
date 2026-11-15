@@ -36,3 +36,31 @@ export async function putState(kv: KVNamespace, state: WatchState): Promise<void
 }
 
 export const isUpcoming = (w: Watch) => new Date(w.start).getTime() > Date.now();
+
+/** "settings" key - which notification channels are ticked in the UI. */
+export interface NotifySettings {
+  telegram: { enabled: boolean };
+  email: { enabled: boolean; to: string };
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Coerce untrusted input into valid settings. */
+export function parseSettings(raw: unknown): NotifySettings {
+  const r = (raw ?? {}) as { telegram?: { enabled?: unknown }; email?: { enabled?: unknown; to?: unknown } };
+  const to = typeof r.email?.to === "string" ? r.email.to.trim().slice(0, 254) : "";
+  return {
+    telegram: { enabled: r.telegram?.enabled === true },
+    email: { enabled: r.email?.enabled === true, to: EMAIL_RE.test(to) ? to : "" },
+  };
+}
+
+/** Saved settings, or a default of "Telegram on" until the user saves their own. */
+export async function getSettings(kv: KVNamespace): Promise<NotifySettings> {
+  const saved = await kv.get("settings", "json");
+  return saved ? parseSettings(saved) : { telegram: { enabled: true }, email: { enabled: false, to: "" } };
+}
+
+export async function putSettings(kv: KVNamespace, s: NotifySettings): Promise<void> {
+  await kv.put("settings", JSON.stringify(s));
+}

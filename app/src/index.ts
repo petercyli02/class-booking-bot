@@ -1,24 +1,24 @@
-import { notify, telegramChats } from "./notify";
+import { configured, notify, telegramChats, type NotifyEnv } from "./notify";
 import { providers } from "./providers";
 import type { FitnessClass } from "./providers/types";
 import {
   MAX_WATCHES,
+  getSettings,
   getState,
   getWatches,
   isUpcoming,
+  parseSettings,
+  putSettings,
   putState,
   putWatches,
   type Watch,
   type WatchState,
 } from "./store";
 
-export interface Env {
+export interface Env extends NotifyEnv {
   ASSETS: Fetcher;
   WATCH_KV: KVNamespace;
   ACCESS_KEY?: string;
-  NTFY_TOPIC?: string;
-  TELEGRAM_BOT_TOKEN?: string;
-  TELEGRAM_CHAT_ID?: string;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -85,19 +85,32 @@ async function handleApi(req: Request, env: Env, ctx: ExecutionContext): Promise
   }
 
   // Everything below changes or reveals your watch list -> needs the access key.
-  if (path.startsWith("/api/watches") || ["/api/auth", "/api/test-notify", "/api/telegram-chats"].includes(path)) {
+  if (path.startsWith("/api/watches") || ["/api/auth", "/api/settings", "/api/test-notify", "/api/telegram-chats"].includes(path)) {
     if (!authorised(req, env)) return error("invalid access key", 401);
   }
 
   if (path === "/api/auth" && req.method === "GET") return json({ ok: true, maxWatches: MAX_WATCHES });
 
   if (path === "/api/test-notify" && req.method === "POST") {
-    const result = await notify(env, {
-      title: "Class watch test",
+    // Tests the settings currently shown in the UI (sent in the body), falling back to saved ones.
+    const body = await req.json().catch(() => null);
+    const settings = body ? parseSettings(body) : await getSettings(env.WATCH_KV);
+    const result = await notify(env, settings, {
+      title: "classwatch test",
       body: "Notifications are working.",
       link: url.origin,
     });
-    return result.ok ? json({ ok: true }) : error(`Push failed - ${result.detail}`, 502);
+    return json(result, result.ok ? 200 : 502);
+  }
+
+  if (path === "/api/settings" && req.method === "GET") {
+    return json({ settings: await getSettings(env.WATCH_KV), configured: configured(env) });
+  }
+
+  if (path === "/api/settings" && req.method === "PUT") {
+    const settings = parseSettings(await req.json().catch(() => null));
+    await putSettings(env.WATCH_KV, settings);
+    return json({ settings, configured: configured(env) });
   }
 
   // Setup helper: after messaging your bot, this lists chats so you can find TELEGRAM_CHAT_ID.
@@ -170,7 +183,7 @@ async function checkWatches(env: Env): Promise<void> {
   const watches = (await getWatches(env.WATCH_KV)).filter(isUpcoming);
   if (!watches.length) return;
 
-  const prev = await getState(env.WATCH_KV);
+  const [prev, settings] = await Promise.all([getState(env.WATCH_KV), getSettings(env.WATCH_KV)]);
   const next: WatchState = {};
   let changed = false;
 
@@ -209,7 +222,7 @@ async function checkWatches(env: Env): Promise<void> {
           hour: "2-digit",
           minute: "2-digit",
         }).format(new Date(c.start));
-        const { ok: sent } = await notify(env, {
+        const { ok: sent } = await notify(env, settings, {
           title: `Space at ${provider.name}: ${c.name}`,
           body: `${when} - ${c.spots} spot${c.spots === 1 ? "" : "s"} free. Book fast!`,
           link: c.bookUrl,
