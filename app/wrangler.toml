@@ -12,15 +12,17 @@ run_worker_first = ["/api/*"]
 [triggers]
 crons = ["* * * * *"]
 
-# Create with: npx wrangler kv namespace create WATCH_KV  -> paste the id here.
-[[kv_namespaces]]
-binding = "WATCH_KV"
-
-id = "5fb7bc4b4141463abd3d0d3e8d253fac"
+# Create with: npx wrangler d1 create classwatch  -> paste the database_id here.
+# Tables are created automatically on first request.
+[[d1_databases]]
+binding = "DB"
+database_name = "classwatch"
+database_id = "ac2402e2-9665-4b39-afe0-70b2c6143f53"
 
 # Secrets (Worker > Settings > Variables and Secrets, type Secret - not in this file):
-#   ACCESS_KEY          - passphrase the UI needs to change watches/settings
-#   TELEGRAM_BOT_TOKEN  - from @BotFather
-#   TELEGRAM_CHAT_ID    - Settings > "Find chat ID" in the UI
-#   RESEND_API_KEY      - from resend.com (email)
+#   ACCESS_KEY          - shared with friends; opens the app
+#   OWNER_KEY           - only you; use it instead of ACCESS_KEY to be the owner
+#   TELEGRAM_BOT_TOKEN  - from @BotFather; everyone connects their own chat in Settings
+#   RESEND_API_KEY      - owner-only email (optional)
+#   EMAIL_TO            - owner's address (optional; email is hidden unless this + RESEND_API_KEY are set)
 #   EMAIL_FROM          - optional; defaults to classwatch <onboarding@resend.dev>

@@ -85,32 +85,55 @@
 
       <section class="settings-section">
         <h3>Access key</h3>
-        <p class="muted small-text">The <code>ACCESS_KEY</code> secret you set on the Worker. It's remembered on this device.</p>
-        <label class="sr-only" for="access-key">Access key</label>
-        <input class="input" id="access-key" type="password" autocomplete="current-password" placeholder="Access key" />
+        <p class="muted small-text">Ask whoever runs this app for the access key. It's remembered on this device.</p>
+        <div class="row">
+          <label class="sr-only" for="access-key">Access key</label>
+          <input class="input" id="access-key" type="password" autocomplete="current-password" placeholder="Access key" />
+          <button type="button" class="btn primary" id="key-continue">Continue</button>
+        </div>
       </section>
 
-      <section class="settings-section">
+      <section class="settings-section" id="sec-profile" hidden>
+        <h3>Your profile</h3>
+        <div id="profile-new" hidden>
+          <p class="muted small-text">Create a profile to get your own watch list and alerts.</p>
+          <div class="row">
+            <label class="sr-only" for="profile-name">Your name</label>
+            <input class="input" id="profile-name" maxlength="40" autocomplete="given-name" placeholder="Your name" />
+            <button type="button" class="btn primary" id="profile-create">Create</button>
+          </div>
+          <button type="button" class="link" id="show-restore">Already set up on another device?</button>
+          <div class="row" id="restore-row" hidden>
+            <label class="sr-only" for="restore-token">Personal key</label>
+            <input class="input" id="restore-token" autocomplete="off" placeholder="Paste your personal key" />
+            <button type="button" class="btn ghost" id="restore-go">Use</button>
+          </div>
+        </div>
+        <div id="profile-me" hidden>
+          <div class="me"><span id="me-name"></span><span class="badge" id="me-owner" hidden>Owner</span></div>
+          <p class="muted small-text" id="personal-key-row">
+            <button type="button" class="link" id="copy-token">Copy personal key</button> to use this profile on another device.
+          </p>
+        </div>
+      </section>
+
+      <section class="settings-section" id="sec-notify" hidden>
         <h3>Notify me via</h3>
-        <p class="muted small-text" id="notify-locked">Save your access key to choose notification channels.</p>
-        <div id="notify-options" hidden>
-          <div class="option">
-            <input type="checkbox" id="ch-telegram" />
-            <label for="ch-telegram" class="option-body">
-              <span class="option-title">Telegram</span>
-              <span class="option-status" id="st-telegram"></span>
-            </label>
-            <button type="button" class="btn ghost small" id="tg-chats">Find chat ID</button>
-          </div>
-          <div class="option">
-            <input type="checkbox" id="ch-email" />
-            <label for="ch-email" class="option-body">
-              <span class="option-title">Email</span>
-              <span class="option-status" id="st-email"></span>
-            </label>
-          </div>
-          <label class="sr-only" for="email-to">Email address</label>
-          <input class="input" id="email-to" type="email" autocomplete="email" placeholder="you@example.com" />
+        <div class="option">
+          <input type="checkbox" id="ch-telegram" />
+          <label for="ch-telegram" class="option-body">
+            <span class="option-title">Telegram</span>
+            <span class="option-status" id="st-telegram"></span>
+          </label>
+          <button type="button" class="btn ghost small" id="tg-connect">Connect</button>
+        </div>
+        <a class="link small-text" id="tg-link" href="#" target="_blank" rel="noopener" hidden>Telegram didn't open? Tap here.</a>
+        <div class="option" id="opt-email" hidden>
+          <input type="checkbox" id="ch-email" />
+          <label for="ch-email" class="option-body">
+            <span class="option-title">Email</span>
+            <span class="option-status ready">Owner only</span>
+          </label>
         </div>
       </section>
 
@@ -118,8 +141,8 @@
       <div class="modal-actions">
         <button type="button" class="btn ghost" id="test-notify" hidden>Send test</button>
         <span class="spacer"></span>
-        <button type="button" class="btn ghost" id="settings-cancel">Cancel</button>
-        <button type="submit" class="btn primary">Save</button>
+        <button type="button" class="btn ghost" id="sign-out" hidden>Sign out</button>
+        <button type="submit" class="btn primary" id="settings-done">Done</button>
       </div>
     </form>
   </dialog>

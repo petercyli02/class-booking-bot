@@ -1,5 +1,3 @@
-import type { NotifySettings } from "./store";
-
 export interface Notification {
   title: string;
   body: string;
@@ -8,10 +6,21 @@ export interface Notification {
 
 export interface NotifyEnv {
   TELEGRAM_BOT_TOKEN?: string;
+  /** Optional fallback for the owner if they haven't connected Telegram in the app. */
   TELEGRAM_CHAT_ID?: string;
   RESEND_API_KEY?: string;
+  /** Owner's address. A secret so it never reaches any browser. */
+  EMAIL_TO?: string;
   /** Optional. Without your own verified domain, Resend only allows onboarding@resend.dev. */
   EMAIL_FROM?: string;
+}
+
+/** Who to notify and how. Email is only ever used for the owner. */
+export interface Recipient {
+  is_owner: number;
+  telegram_chat_id: string | null;
+  notify_telegram: number;
+  notify_email: number;
 }
 
 export type Channel = "telegram" | "email";
@@ -25,55 +34,45 @@ export interface ChannelResult {
 export interface NotifyResult {
   ok: boolean;
   results: ChannelResult[];
-  /** Human-readable summary when ok is false */
   detail?: string;
 }
 
-/** Which channels have the secrets they need. */
-export function configured(env: NotifyEnv) {
-  return {
-    telegram: Boolean(env.TELEGRAM_BOT_TOKEN?.trim() && env.TELEGRAM_CHAT_ID?.trim()),
-    email: Boolean(env.RESEND_API_KEY?.trim()),
-  };
+export const botReady = (env: NotifyEnv) => Boolean(env.TELEGRAM_BOT_TOKEN?.trim());
+export const emailReady = (env: NotifyEnv) => Boolean(env.RESEND_API_KEY?.trim() && env.EMAIL_TO?.trim());
+
+export function chatIdFor(env: NotifyEnv, r: Recipient): string | null {
+  return r.telegram_chat_id || (r.is_owner ? env.TELEGRAM_CHAT_ID?.trim() || null : null);
 }
 
-/** Sends on every enabled channel. ok = at least one delivered. */
-export async function notify(env: NotifyEnv, settings: NotifySettings, n: Notification): Promise<NotifyResult> {
-  const ready = configured(env);
+/** Sends on each of the recipient's enabled channels. ok = at least one delivered. */
+export async function notifyRecipient(env: NotifyEnv, r: Recipient, n: Notification): Promise<NotifyResult> {
   const jobs: Promise<ChannelResult>[] = [];
 
-  if (settings.telegram.enabled) {
+  if (r.notify_telegram) {
+    const chatId = chatIdFor(env, r);
     jobs.push(
-      ready.telegram
-        ? telegram(env.TELEGRAM_BOT_TOKEN!.trim(), env.TELEGRAM_CHAT_ID!.trim(), n)
-        : Promise.resolve({ channel: "telegram", ok: false, detail: "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets not set" }),
+      !botReady(env)
+        ? Promise.resolve({ channel: "telegram", ok: false, detail: "the app's Telegram bot isn't set up yet" })
+        : !chatId
+          ? Promise.resolve({ channel: "telegram", ok: false, detail: "Telegram isn't connected - tap Connect" })
+          : telegram(env.TELEGRAM_BOT_TOKEN!.trim(), chatId, n),
     );
   }
-  if (settings.email.enabled) {
-    jobs.push(
-      !ready.email
-        ? Promise.resolve({ channel: "email", ok: false, detail: "RESEND_API_KEY secret not set" })
-        : !settings.email.to
-          ? Promise.resolve({ channel: "email", ok: false, detail: "no email address saved" })
-          : email(env.RESEND_API_KEY!.trim(), env.EMAIL_FROM?.trim() || "classwatch <onboarding@resend.dev>", settings.email.to, n),
-    );
+  // Owner-only, and invisible unless RESEND_API_KEY + EMAIL_TO are set.
+  if (r.is_owner && r.notify_email && emailReady(env)) {
+    jobs.push(email(env.RESEND_API_KEY!.trim(), env.EMAIL_FROM?.trim() || "classwatch <onboarding@resend.dev>", env.EMAIL_TO!.trim(), n));
   }
 
-  if (!jobs.length) return { ok: false, results: [], detail: "no notification channel is ticked in Settings" };
+  if (!jobs.length) return { ok: false, results: [], detail: "no notification channel is turned on" };
   const results = await Promise.all(jobs);
-  const ok = results.some((r) => r.ok);
-  const detail = ok ? undefined : results.map((r) => `${r.channel}: ${r.detail}`).join("; ");
-  return { ok, results, detail };
+  const ok = results.some((x) => x.ok);
+  return { ok, results, detail: ok ? undefined : results.map((x) => `${x.channel}: ${x.detail}`).join("; ") };
 }
 
 // ------------------------------------------------------------- telegram ---
 
 async function telegram(token: string, chatId: string, n: Notification): Promise<ChannelResult> {
-  const payload: Record<string, unknown> = {
-    chat_id: chatId,
-    text: `${n.title}\n${n.body}`,
-    disable_web_page_preview: true,
-  };
+  const payload: Record<string, unknown> = { chat_id: chatId, text: `${n.title}\n${n.body}`, disable_web_page_preview: true };
   if (n.link?.startsWith("https://")) payload.reply_markup = { inline_keyboard: [[{ text: "Book now", url: n.link }]] };
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -90,21 +89,37 @@ async function telegram(token: string, chatId: string, n: Notification): Promise
   }
 }
 
-/** Chats that have messaged the bot recently - used to find your chat id during setup. */
-export async function telegramChats(token: string): Promise<{ id: number; name: string }[]> {
-  const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates`);
+let botUsername: string | null = null;
+
+export async function getBotUsername(token: string): Promise<string> {
+  if (botUsername) return botUsername;
+  const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getMe`);
+  const data = (await res.json()) as { ok: boolean; description?: string; result?: { username: string } };
+  if (!data.ok || !data.result) throw new Error(data.description ?? "couldn't reach the Telegram bot");
+  return (botUsername = data.result.username);
+}
+
+/** Looks for "/start <code>" sent to the bot and returns that chat's id. */
+export async function findChatForCode(token: string, code: string): Promise<string | null> {
+  const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates?allowed_updates=%5B%22message%22%5D`);
   const data = (await res.json()) as {
     ok: boolean;
     description?: string;
-    result?: { message?: { chat: { id: number; first_name?: string; username?: string; title?: string } } }[];
+    result?: { message?: { text?: string; chat: { id: number } } }[];
   };
-  if (!data.ok) throw new Error(data.description ?? `Telegram replied ${res.status}`);
-  const chats = new Map<number, string>();
-  for (const u of data.result ?? []) {
-    const c = u.message?.chat;
-    if (c) chats.set(c.id, c.title ?? c.username ?? c.first_name ?? String(c.id));
+  if (!data.ok) throw new Error(data.description ?? "Telegram error");
+  for (const u of (data.result ?? []).reverse()) {
+    if (u.message?.text?.trim() === `/start ${code}`) return String(u.message.chat.id);
   }
-  return [...chats].map(([id, name]) => ({ id, name }));
+  return null;
+}
+
+export async function sendText(token: string, chatId: string, text: string) {
+  await fetch(`https://api.telegram.org/bot${token.trim()}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  }).catch(() => {});
 }
 
 // ---------------------------------------------------------------- email ---
@@ -121,13 +136,7 @@ async function email(apiKey: string, from: string, to: string, n: Notification):
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject: n.title,
-        text: `${n.body}${n.link ? `\n\nBook: ${n.link}` : ""}`,
-        html,
-      }),
+      body: JSON.stringify({ from, to: [to], subject: n.title, text: `${n.body}${n.link ? `\n\nBook: ${n.link}` : ""}`, html }),
     });
     if (res.ok) return { channel: "email", ok: true };
     const data = (await res.json().catch(() => ({}))) as { message?: string };

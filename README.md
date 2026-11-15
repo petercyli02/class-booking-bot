@@ -3,7 +3,7 @@
 Get a push notification the moment a full fitness class has a free spot.
 
 - **Web app** (`app/`): browse a studio's timetable, tap the bell on the classes you want, and a
-  Cloudflare cron job checks them every minute and alerts you by Telegram and/or email
+  Cloudflare cron job checks them every minute and alerts each person on Telegram (plus email for the owner)
   with a "Book now" link. Runs entirely on Cloudflare's free plan.
 - **CLI** (`watcher.py`): the original single-file Python version, handy for `list`-ing classes.
 
@@ -15,48 +15,49 @@ one config entry; other platforms need an adapter (see *Adding studios*).
 ### Architecture
 One Cloudflare Worker that:
 - serves the static UI from `app/public/` (plain HTML, CSS and JS, no build step)
-- exposes `/api/*`: `providers`, `classes` (proxied and normalised, with a 30s edge cache), `watches` (behind an access key)
-- runs a **cron every minute**: reads your watches from KV, fetches those classes, and alerts you on a *full → open* transition
+- exposes `/api/*`: `providers` and `classes` are public; everything else needs a key
+- runs a **cron every minute**: loads every upcoming watch across all users, fetches each class once, and
+  alerts everyone watching it on a *full → open* transition
 
-KV stores three keys. `watches` and `settings` (which channels are ticked) are written only by the UI, and `state` is written
-only by the cron, and only when a class flips between full and open. This keeps it well inside the free 1,000 writes/day.
+Storage is **D1** (`users`, `watches`, `class_state`); tables are created automatically on first request.
 
-### Limits
-Up to **50 watched classes** (`MAX_WATCHES` in `src/store.ts`). The cron fetches one request per week of
-watched dates rather than one per class, so the real constraint is the free plan's 50 outbound requests
-per run. 50 watches stays comfortably inside that.
+### Who can do what
+| Key | Who | Gets |
+|---|---|---|
+| `ACCESS_KEY` | You and friends | Opens the app. Each person creates a profile (just a name) and gets their own watch list and Telegram alerts. |
+| `OWNER_KEY` | Only you | Signs you in as the owner. Email alerts exist only for the owner; the server never sends the email option to anyone else. |
+
+A friend's device stores a random personal key (shown as **Copy personal key** in Settings) so they can use the same
+profile on another device. Limits: 25 people, 20 watches each (`app/src/db.ts`).
 
 ### Deploy (free)
 ```bash
 cd app
 npm install
 npx wrangler login
-npx wrangler kv namespace create WATCH_KV     # paste the id into wrangler.toml
+npx wrangler d1 create classwatch            # paste the database_id into wrangler.toml
 npx wrangler deploy
 ```
-Then add secrets in the dashboard (Worker > Settings > Variables and Secrets, type **Secret**), or with `npx wrangler secret put <NAME>`:
+Then add secrets (Worker > Settings > Variables and Secrets, type **Secret**):
 
 | Secret | Needed for |
 |---|---|
-| `ACCESS_KEY` | Always. Any long passphrase; the UI asks for it |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram alerts |
-| `RESEND_API_KEY` | Email alerts |
+| `ACCESS_KEY` | Always. Share it with friends |
+| `OWNER_KEY` | Always. Keep it to yourself |
+| `TELEGRAM_BOT_TOKEN` | Telegram alerts (one bot for everyone) |
+| `RESEND_API_KEY`, `EMAIL_TO` | Optional owner-only email |
 | `EMAIL_FROM` | Optional. Only if you've verified your own domain in Resend |
 
-Open the app, go to ⚙️ Settings, enter the access key, tick **Telegram** and/or **Email**, and tap **Send test**.
-
 ### Notifications
-Pick the channels in Settings; an alert counts as sent if any ticked channel succeeds.
-- **Telegram:** message @BotFather, send `/newbot`, and put the token in `TELEGRAM_BOT_TOKEN`. Send your new bot any
-  message, then tap **Find chat ID** in Settings and put that number in `TELEGRAM_CHAT_ID`.
-- **Email (Resend):** create a free account at resend.com and an API key, and put it in `RESEND_API_KEY`. Without your own
-  domain, Resend sends from `onboarding@resend.dev` and **only to the address you signed up with**, so enter that
-  address in Settings.
+- **Telegram:** create one bot with @BotFather and set `TELEGRAM_BOT_TOKEN`. Each person taps **Connect** in Settings,
+  presses **Start** in Telegram, and the app links their chat automatically.
+- **Email (owner only):** Resend API key in `RESEND_API_KEY`, your address in `EMAIL_TO`. Without your own domain, Resend
+  only sends to the address you signed up with.
 
 ### Local dev
 ```bash
 cd app
-# .dev.vars (gitignored):  ACCESS_KEY=...  TELEGRAM_BOT_TOKEN=...  TELEGRAM_CHAT_ID=...  RESEND_API_KEY=...
+# .dev.vars (gitignored):  ACCESS_KEY=...  OWNER_KEY=...  TELEGRAM_BOT_TOKEN=...
 npm run dev                                   # http://localhost:8787
 curl "http://localhost:8787/__scheduled?cron=*+*+*+*+*"   # trigger the cron by hand
 ```

@@ -16,11 +16,13 @@ const state = {
   classes: new Map(),  // weekKey -> FitnessClass[]
   watches: new Map(),  // key -> Watch
   watchState: {},
-  maxWatches: 50,
+  maxWatches: 20,
   filter: "all",
   query: "",
-  key: store.get("cw:key"),
-  pending: null,       // action to resume after entering access key
+  key: store.get("cw:key"),        // ACCESS_KEY or OWNER_KEY
+  token: store.get("cw:token"),    // personal token (friends only)
+  me: null,                        // profile once signed in
+  pending: null,                   // action to resume after signing in
 };
 
 // ---------------------------------------------------------------- dates ---
@@ -44,6 +46,7 @@ async function api(path, { method = "GET", body, auth = false } = {}) {
   const headers = {};
   if (body) headers["content-type"] = "application/json";
   if (auth && state.key) headers.authorization = `Bearer ${state.key}`;
+  if (auth && state.token) headers["x-user-token"] = state.token;
   const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -87,19 +90,51 @@ async function loadWeek() {
   if (key === weekKey()) render();
 }
 
+/** Who am I? Sets state.me (or null). Returns the raw /api/me response. */
+async function refreshMe() {
+  if (!state.key) {
+    state.me = null;
+    return null;
+  }
+  try {
+    const data = await api("/api/me", { auth: true });
+    state.me = data.needsProfile ? null : data;
+    if (data.needsProfile && state.token) {
+      state.token = null; // stale personal token
+      store.set("cw:token", null);
+    }
+    return data;
+  } catch (e) {
+    if (e.status === 401) signOut(false);
+    throw e;
+  }
+}
+
 async function loadWatches() {
-  if (!state.key) return renderWatchCount();
+  if (!state.me) {
+    state.watches = new Map();
+    return render();
+  }
   try {
     const data = await api("/api/watches", { auth: true });
     state.watches = new Map(data.watches.map((w) => [w.key, w]));
     state.watchState = data.state || {};
-    state.maxWatches = data.maxWatches || 50;
+    state.maxWatches = data.maxWatches || 20;
   } catch (e) {
-    if (e.status === 401) {
-      state.key = null;
-      store.set("cw:key", null);
-    }
+    if (e.status === 401) state.me = null;
   }
+  render();
+}
+
+function signOut(clearKey = true) {
+  if (clearKey) {
+    state.key = null;
+    store.set("cw:key", null);
+  }
+  state.token = null;
+  store.set("cw:token", null);
+  state.me = null;
+  state.watches = new Map();
   render();
 }
 
@@ -209,9 +244,9 @@ function liveClass(key) {
 
 function renderDrawer() {
   const items = [...state.watches.values()].sort((a, b) => a.start.localeCompare(b.start));
-  $("#drawer-sub").textContent = !state.key
-    ? "Add your access key in Settings to start watching."
-    : `${items.length} of ${state.maxWatches} - you'll get a push the moment a spot opens.`;
+  $("#drawer-sub").textContent = !state.me
+    ? "Open Settings and sign in to start watching."
+    : `${items.length} of ${state.maxWatches} - you'll get an alert the moment a spot opens.`;
   $("#watch-list").innerHTML = items.length
     ? items.map((w) => {
         const c = liveClass(w.key);
@@ -236,7 +271,7 @@ function findClass(key) {
 }
 
 async function toggleWatch(key) {
-  if (!state.key) {
+  if (!state.me) {
     state.pending = () => toggleWatch(key);
     return openSettings();
   }
@@ -256,10 +291,9 @@ async function toggleWatch(key) {
     render();
   } catch (e) {
     if (e.status === 401) {
-      state.key = null;
-      store.set("cw:key", null);
+      state.me = null;
       state.pending = () => toggleWatch(key);
-      return openSettings("That access key didn't work.");
+      return openSettings(e.data?.needsProfile ? "Create your profile to start watching." : "Please sign in again.");
     }
     toast(e.message);
   }
@@ -267,8 +301,7 @@ async function toggleWatch(key) {
 
 // ------------------------------------------------------------- settings ---
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-let settingsLoaded = false;
+let tgPoll = null;
 
 function setMsg(text, cls = "") {
   const el = $("#settings-msg");
@@ -276,122 +309,213 @@ function setMsg(text, cls = "") {
   el.className = `form-msg ${cls}`;
 }
 
-function setStatus(id, ready, needs) {
-  const el = $(id);
-  el.className = `option-status ${ready ? "ready" : "todo"}`;
-  el.textContent = ready ? "Set up" : `Needs ${needs}`;
-}
+/** Show the right sections for: no key / key but no profile / signed in. */
+function renderSettings(needsProfile = false) {
+  const me = state.me;
+  $("#sec-profile").hidden = !me && !needsProfile;
+  $("#profile-new").hidden = !needsProfile;
+  $("#profile-me").hidden = !me;
+  $("#sec-notify").hidden = !me;
+  $("#test-notify").hidden = !me;
+  $("#sign-out").hidden = !state.key;
+  $("#key-continue").hidden = Boolean(me);
+  if (!me) return;
 
-function showNotifyOptions(show) {
-  $("#notify-options").hidden = !show;
-  $("#notify-locked").hidden = show;
-  $("#test-notify").hidden = !show;
-}
+  $("#me-name").textContent = me.user.name;
+  $("#me-owner").hidden = !me.user.isOwner;
+  $("#personal-key-row").hidden = me.user.isOwner || !state.token;
 
-function syncEmailField() {
-  $("#email-to").disabled = !$("#ch-email").checked;
-}
+  const tg = me.telegram;
+  $("#ch-telegram").checked = tg.enabled;
+  $("#ch-telegram").disabled = !tg.botReady;
+  const st = $("#st-telegram");
+  st.className = `option-status ${tg.connected ? "ready" : "todo"}`;
+  st.textContent = !tg.botReady ? "The owner hasn't set up the bot yet" : tg.connected ? "Connected" : "Not connected";
+  const btn = $("#tg-connect");
+  btn.hidden = !tg.botReady;
+  btn.textContent = tg.connected ? "Disconnect" : "Connect";
 
-function fillSettings({ settings, configured }) {
-  $("#ch-telegram").checked = settings.telegram.enabled;
-  $("#ch-email").checked = settings.email.enabled;
-  $("#email-to").value = settings.email.to || "";
-  setStatus("#st-telegram", configured.telegram, "TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID");
-  setStatus("#st-email", configured.email, "RESEND_API_KEY");
-  $("#tg-chats").hidden = configured.telegram;
-  syncEmailField();
-  settingsLoaded = true;
-  showNotifyOptions(true);
-}
-
-function settingsFromForm() {
-  return {
-    telegram: { enabled: $("#ch-telegram").checked },
-    email: { enabled: $("#ch-email").checked, to: $("#email-to").value.trim() },
-  };
-}
-
-function validateForm() {
-  const s = settingsFromForm();
-  if (s.email.enabled && !EMAIL_RE.test(s.email.to)) return "Enter a valid email address, or untick Email.";
-  if (!s.telegram.enabled && !s.email.enabled) return "Tick at least one channel, or you won't get alerts.";
-  return "";
-}
-
-/** Run an API call with the key currently typed in the form. */
-async function withFormKey(fn) {
-  const key = $("#access-key").value.trim();
-  if (!key) throw Object.assign(new Error("Enter your access key first."), { status: 0 });
-  const prev = state.key;
-  state.key = key;
-  try {
-    return await fn();
-  } finally {
-    state.key = prev;
-  }
+  // Owner-only. The server only sends `email` to the owner, so others never see this row.
+  $("#opt-email").hidden = !me.email;
+  if (me.email) $("#ch-email").checked = me.email.enabled;
 }
 
 async function openSettings(msg = "") {
   $("#access-key").value = state.key || "";
+  $("#profile-name").value = "";
+  $("#restore-row").hidden = true;
+  $("#tg-link").hidden = true;
   setMsg(msg, msg ? "err" : "");
-  settingsLoaded = false;
-  showNotifyOptions(false);
+  renderSettings(false);
   $("#settings").showModal();
   if (!state.key) return $("#access-key").focus();
   try {
-    fillSettings(await api("/api/settings", { auth: true }));
+    const data = await refreshMe();
+    renderSettings(Boolean(data?.needsProfile));
   } catch (e) {
-    setMsg(e.status === 401 ? "Your saved access key no longer works." : e.message, "err");
+    setMsg(e.status === 401 ? "Your saved key no longer works." : e.message, "err");
+    renderSettings(false);
   }
 }
 
-async function saveSettings(e) {
-  e.preventDefault();
-  const key = $("#access-key").value.trim();
-  if (!key) return setMsg("Enter your access key.", "err");
+function closeSettings() {
+  clearInterval(tgPoll);
+  tgPoll = null;
+  state.pending = null;
+  $("#settings").close();
+}
 
-  // 1. New or unverified key: check it first.
-  if (key !== state.key || !settingsLoaded) {
-    let data;
-    try {
-      data = await withFormKey(() => api("/api/settings", { auth: true }));
-    } catch (err) {
-      return setMsg(err.status === 401 ? "That access key didn't work." : err.message, "err");
-    }
-    state.key = key;
+/** After signing in: resume whatever the user was trying to do. */
+function afterSignIn() {
+  loadWatches();
+  if (state.pending) {
+    const next = state.pending;
+    state.pending = null;
+    $("#settings").close();
+    next();
+  }
+}
+
+async function continueWithKey() {
+  const key = $("#access-key").value.trim();
+  if (!key) return setMsg("Enter the access key.", "err");
+  const prev = state.key;
+  state.key = key;
+  try {
+    const data = await refreshMe();
     store.set("cw:key", key);
-    loadWatches();
-    if (state.pending) {
-      const next = state.pending;
-      state.pending = null;
-      $("#settings").close();
-      return next();
+    setMsg(data.needsProfile ? "Key accepted. Now create your profile." : `Signed in as ${state.me.user.name}.`, "ok");
+    renderSettings(Boolean(data.needsProfile));
+    if (data.needsProfile) $("#profile-name").focus();
+    else afterSignIn();
+  } catch (e) {
+    state.key = prev;
+    setMsg(e.status === 401 ? "That key didn't work." : e.message, "err");
+  }
+}
+
+async function createProfile() {
+  const name = $("#profile-name").value.trim();
+  if (!name) return setMsg("Enter your name.", "err");
+  try {
+    const data = await api("/api/profile", { method: "POST", auth: true, body: { name } });
+    state.token = data.token;
+    store.set("cw:token", data.token);
+    state.me = data;
+    setMsg(`Welcome, ${name}! Now connect Telegram to get alerts.`, "ok");
+    renderSettings(false);
+    afterSignIn();
+  } catch (e) {
+    setMsg(e.message, "err");
+  }
+}
+
+async function restoreProfile() {
+  const token = $("#restore-token").value.trim();
+  if (!token) return setMsg("Paste your personal key.", "err");
+  state.token = token;
+  try {
+    const data = await api("/api/me", { auth: true });
+    if (data.needsProfile) throw new Error("That personal key wasn't recognised.");
+    store.set("cw:token", token);
+    state.me = data;
+    setMsg(`Signed in as ${data.user.name}.`, "ok");
+    renderSettings(false);
+    afterSignIn();
+  } catch (e) {
+    state.token = null;
+    setMsg(e.message, "err");
+  }
+}
+
+async function copyToken() {
+  try {
+    await navigator.clipboard.writeText(state.token);
+    setMsg("Personal key copied. On your other device, enter the access key, then choose “Already set up on another device?” and paste it.", "ok");
+  } catch {
+    setMsg(`Your personal key: ${state.token}`, "ok");
+  }
+}
+
+async function toggleTelegram() {
+  const tg = state.me?.telegram;
+  if (!tg) return;
+  if (tg.connected) {
+    try {
+      state.me = await api("/api/telegram/disconnect", { method: "POST", auth: true });
+      setMsg("Telegram disconnected.", "ok");
+      renderSettings(false);
+    } catch (e) {
+      setMsg(e.message, "err");
     }
-    if (!settingsLoaded) {
-      fillSettings(data);
-      return setMsg("Key saved. Now choose how to be notified.", "ok");
-    }
+    return;
   }
 
-  // 2. Save notification channels.
-  const problem = validateForm();
-  if (problem) return setMsg(problem, "err");
+  // Open the window synchronously (inside the click) so popup blockers allow it.
+  const win = window.open("about:blank", "_blank");
+  let url;
   try {
-    await api("/api/settings", { method: "PUT", auth: true, body: settingsFromForm() });
+    ({ url } = await api("/api/telegram/link", { method: "POST", auth: true }));
+  } catch (e) {
+    win?.close();
+    return setMsg(e.message, "err");
+  }
+  if (win) win.location.href = url;
+  const link = $("#tg-link");
+  link.href = url;
+  link.hidden = false;
+  setMsg("In Telegram, press Start. This will update automatically.");
+
+  clearInterval(tgPoll);
+  const started = Date.now();
+  tgPoll = setInterval(async () => {
+    if (!$("#settings").open || Date.now() - started > 180_000) {
+      clearInterval(tgPoll);
+      if ($("#settings").open && !state.me?.telegram.connected) setMsg("Didn't see you press Start. Tap Connect to try again.", "err");
+      return;
+    }
+    try {
+      const { connected } = await api("/api/telegram/check", { method: "POST", auth: true });
+      if (!connected) return;
+      clearInterval(tgPoll);
+      await refreshMe();
+      link.hidden = true;
+      setMsg("Telegram connected - check your chat for a confirmation.", "ok");
+      renderSettings(false);
+    } catch {}
+  }, 3000);
+}
+
+function channelsFromForm() {
+  return {
+    telegram: { enabled: $("#ch-telegram").checked },
+    ...(state.me?.email ? { email: { enabled: $("#ch-email").checked } } : {}),
+  };
+}
+
+async function saveAndClose(e) {
+  e.preventDefault();
+  if (!state.me) {
+    // Enter in the key field = Continue.
+    if (!state.key || $("#access-key").value.trim() !== state.key) return continueWithKey();
+    return closeSettings();
+  }
+  const ch = channelsFromForm();
+  if (!ch.telegram.enabled && !ch.email?.enabled) return setMsg("Turn on at least one channel, or you won't get alerts.", "err");
+  try {
+    state.me = await api("/api/settings", { method: "PUT", auth: true, body: ch });
   } catch (err) {
     return setMsg(err.message, "err");
   }
-  $("#settings").close();
+  closeSettings();
   toast("Settings saved");
 }
 
 async function testNotify() {
-  const problem = validateForm();
-  if (problem) return setMsg(problem, "err");
   setMsg("Sending...");
   let data;
   try {
-    data = await withFormKey(() => api("/api/test-notify", { method: "POST", auth: true, body: settingsFromForm() }));
+    data = await api("/api/test-notify", { method: "POST", auth: true, body: channelsFromForm() });
   } catch (err) {
     data = err.data;
     if (!data?.results) return setMsg(err.message, "err");
@@ -399,20 +523,6 @@ async function testNotify() {
   const names = { telegram: "Telegram", email: "Email" };
   const parts = data.results.map((r) => `${names[r.channel]} ${r.ok ? "sent" : `failed: ${r.detail}`}`);
   setMsg(parts.join(" · ") || data.detail, data.results.length && data.results.every((r) => r.ok) ? "ok" : "err");
-}
-
-async function findTelegramChats() {
-  try {
-    const { chats } = await withFormKey(() => api("/api/telegram-chats", { auth: true }));
-    setMsg(
-      chats.length
-        ? `Your TELEGRAM_CHAT_ID: ${chats.map((c) => `${c.id} (${c.name})`).join(", ")}`
-        : "No chats yet. Send your bot any message in Telegram, then try again.",
-      chats.length ? "ok" : "err",
-    );
-  } catch (err) {
-    setMsg(err.message, "err");
-  }
 }
 
 // --------------------------------------------------------------- drawer ---
@@ -483,14 +593,30 @@ function bind() {
   });
 
   $("#open-settings").addEventListener("click", () => openSettings());
-  $("#settings-form").addEventListener("submit", saveSettings);
-  $("#ch-email").addEventListener("change", syncEmailField);
-  $("#settings-cancel").addEventListener("click", () => {
-    state.pending = null;
-    $("#settings").close();
+  $("#settings-form").addEventListener("submit", saveAndClose);
+  $("#settings").addEventListener("close", () => clearInterval(tgPoll));
+  $("#key-continue").addEventListener("click", continueWithKey);
+  $("#profile-create").addEventListener("click", createProfile);
+  $("#profile-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      createProfile();
+    }
   });
+  $("#show-restore").addEventListener("click", () => {
+    $("#restore-row").hidden = false;
+    $("#restore-token").focus();
+  });
+  $("#restore-go").addEventListener("click", restoreProfile);
+  $("#copy-token").addEventListener("click", copyToken);
+  $("#tg-connect").addEventListener("click", toggleTelegram);
   $("#test-notify").addEventListener("click", testNotify);
-  $("#tg-chats").addEventListener("click", findTelegramChats);
+  $("#sign-out").addEventListener("click", () => {
+    signOut();
+    $("#access-key").value = "";
+    setMsg("Signed out on this device.", "ok");
+    renderSettings(false);
+  });
 
   // Refresh availability when coming back to the tab.
   document.addEventListener("visibilitychange", () => {
@@ -515,6 +641,9 @@ async function init() {
     .map((p) => `<option value="${p.id}" ${p.id === state.provider.id ? "selected" : ""}>${escapeHtml(p.name)} · ${escapeHtml(p.location)}</option>`)
     .join("");
   setWeek(mondayOf(localDay()));
+  try {
+    await refreshMe();
+  } catch {}
   loadWatches();
 }
 
