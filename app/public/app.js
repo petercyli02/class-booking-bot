@@ -374,6 +374,40 @@ async function toggleWatch(key) {
 
 let tgPoll = null;
 
+// Lock needs two taps: the first explains what will happen, the second does it.
+let lockArmed = null;
+
+function disarmLock() {
+  clearTimeout(lockArmed);
+  lockArmed = null;
+  const b = $("#sign-out");
+  b.textContent = "Lock";
+  b.classList.remove("danger");
+  b.classList.add("ghost");
+}
+
+function confirmLock() {
+  if (lockArmed) {
+    disarmLock();
+    return lock("Locked. Enter a key to continue.");
+  }
+  const friend = state.me && !state.me.user.isOwner && state.token;
+  setMsg(
+    friend
+      ? "Lock signs this device out and forgets your personal key here. Your watches and alerts keep working, but to get back into this profile you'll need your personal key - tap \u201cCopy personal key\u201d above first. Tap \u201cConfirm lock\u201d to continue."
+      : "Lock signs this device out and forgets the saved key here. Your watches and alerts keep working. Tap \u201cConfirm lock\u201d to continue.",
+    "warn",
+  );
+  const b = $("#sign-out");
+  b.textContent = "Confirm lock";
+  b.classList.remove("ghost");
+  b.classList.add("danger");
+  lockArmed = setTimeout(() => {
+    disarmLock();
+    setMsg("");
+  }, 8000);
+}
+
 function setMsg(text, cls = "") {
   const el = $("#settings-msg");
   el.textContent = text;
@@ -441,6 +475,7 @@ async function openSettings(msg = "") {
 }
 
 function closeSettings() {
+  disarmLock();
   clearInterval(tgPoll);
   tgPoll = null;
   state.pending = null;
@@ -683,7 +718,10 @@ function bind() {
 
   $("#open-settings").addEventListener("click", () => openSettings());
   $("#settings-form").addEventListener("submit", saveAndClose);
-  $("#settings").addEventListener("close", () => clearInterval(tgPoll));
+  $("#settings").addEventListener("close", () => {
+    clearInterval(tgPoll);
+    disarmLock();
+  });
   $("#gate-form").addEventListener("submit", unlock);
   $("#key-change").addEventListener("click", () => showKeyEdit(true));
   $("#key-cancel").addEventListener("click", () => {
@@ -712,7 +750,7 @@ function bind() {
     } catch {}
   });
   $("#test-notify").addEventListener("click", testNotify);
-  $("#sign-out").addEventListener("click", () => lock("Locked. Enter a key to continue."));
+  $("#sign-out").addEventListener("click", confirmLock);
 
   // Refresh availability when coming back to the tab.
   document.addEventListener("visibilitychange", () => {

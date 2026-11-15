@@ -276,6 +276,9 @@ code { font-size: 0.9em; background: var(--surface-2); padding: 1px 5px; border-
 .form-msg { min-height: 20px; font-size: 13px; margin: 6px 0 0; overflow-wrap: anywhere; }
 .form-msg.err { color: var(--full); }
 .form-msg.ok { color: var(--accent-text); }
+.form-msg.warn { color: var(--low); }
+.btn.danger { background: var(--full); color: #fff; }
+.btn.danger:hover { opacity: 0.9; }
 .modal-actions { display: flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
 .spacer { flex: 1; }
 
