@@ -37,6 +37,12 @@ const addDays = (day, n) => {
 const mondayOf = (day) => addDays(day, -((new Date(day + "T12:00:00Z").getUTCDay() + 6) % 7));
 const fmt = (iso, opts) => new Intl.DateTimeFormat("en-GB", { timeZone: tz(), ...opts }).format(new Date(iso));
 const fmtTime = (iso) => fmt(iso, { hour: "2-digit", minute: "2-digit" });
+const fmtRange = (a, b) => {
+  const f = (day, o) => new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...o }).format(new Date(day + "T12:00:00Z"));
+  return a.slice(5, 7) === b.slice(5, 7)
+    ? `${f(a, { day: "numeric" })}–${f(b, { day: "numeric", month: "short" })}`
+    : `${f(a, { day: "numeric", month: "short" })} – ${f(b, { day: "numeric", month: "short" })}`;
+};
 const fmtDayShort = (day) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" }).format(new Date(day + "T12:00:00Z"));
 
@@ -82,6 +88,13 @@ async function loadWeek() {
       `/api/classes?provider=${encodeURIComponent(state.provider.id)}&from=${state.weekStart}&to=${addDays(state.weekStart, 6)}`,
     );
     state.classes.set(key, classes);
+    // Nothing left today? Jump to the next day with classes (next week if needed, e.g. Sunday evening).
+    const today = localDay();
+    if (state.day === today && !classes.some((c) => localDay(new Date(c.start)) === today)) {
+      const next = classes.find((c) => localDay(new Date(c.start)) > today);
+      if (next) state.day = localDay(new Date(next.start));
+      else if (state.weekStart === mondayOf(today)) return setWeek(addDays(state.weekStart, 7));
+    }
   } catch (e) {
     state.classes.delete(key);
     $("#list").innerHTML = `<div class="empty"><strong>Couldn't load classes</strong>${escapeHtml(e.message)}</div>`;
@@ -157,7 +170,7 @@ function renderWeekHeader() {
   const thisWeek = mondayOf(today);
   const diff = Math.round((Date.parse(state.weekStart) - Date.parse(thisWeek)) / 604800000);
   $("#week-label").textContent =
-    diff === 0 ? "This week" : diff === 1 ? "Next week" : diff === -1 ? "Last week" : `Week of ${fmtDayShort(state.weekStart)}`;
+    diff === 0 ? "This week" : diff === 1 ? "Next week" : diff === -1 ? "Last week" : fmtRange(state.weekStart, addDays(state.weekStart, 6));
   $("#prev-week").disabled = diff <= 0;
 
   const watchedDays = new Set([...state.watches.values()].map((w) => localDay(new Date(w.start))));
@@ -212,6 +225,7 @@ function render() {
       <div class="info">
         <div class="name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>
         <div class="meta">
+          <span class="chip chip-inline ${s.cls}">${s.label}</span>
           <span class="bar ${barCls}"><i style="width:${pct}%"></i></span>
           <span class="cap">${c.booked}/${c.capacity} booked</span>
         </div>
